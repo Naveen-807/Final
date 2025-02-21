@@ -1,113 +1,137 @@
-import React, { useState, useRef } from "react";
-import axios from 'axios';
-import Webcam from 'react-webcam';
+import React, { useState, useEffect } from 'react';
+import './HandGestureRecognizer.css';
 
-const SignLanguagePage = ({ darkMode }) => {
-  const [detections, setDetections] = useState([]);
-  const [mode, setMode] = useState(null);
-  const webcamRef = useRef(null);
-  const fileInputRef = useRef(null);
+function App() {
+  const [currentGesture, setCurrentGesture] = useState({ gesture: 'No gesture detected', confidence: 0 });
+  const [supportedGestures, setSupportedGestures] = useState([]);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const detectGesture = async (imageSource) => {
+  // Check camera status on component mount
+  useEffect(() => {
+    checkCameraStatus();
+  }, []);
+
+  const checkCameraStatus = async () => {
     try {
-      let base64Image;
-      
-      // Handle different image sources
-      if (mode === 'webcam') {
-        const imageSrc = webcamRef.current.getScreenshot();
-        base64Image = imageSrc.split(',')[1];
-      } else if (mode === 'upload' && imageSource) {
-        // Convert uploaded file to base64
-        const reader = new FileReader();
-        reader.readAsDataURL(imageSource);
-        base64Image = await new Promise((resolve) => {
-          reader.onloadend = () => {
-            resolve(reader.result.split(',')[1]);
-          };
-        });
-      }
+      const response = await fetch('http://localhost:5000/camera/status');
+      const data = await response.json();
+      setIsCameraOn(data.is_running);
+    } catch (error) {
+      console.error('Error checking camera status:', error);
+    }
+  };
 
-      // Send to backend
-      const response = await axios.post('/detect_gesture', {
-        image: base64Image
+  const toggleCamera = async () => {
+    setIsLoading(true);
+    try {
+      const endpoint = isCameraOn ? '/camera/stop' : '/camera/start';
+      const response = await fetch(`http://localhost:5000${endpoint}`, {
+        method: 'POST'
       });
+      const data = await response.json();
       
-      // Update detections
-      if (response.data.success) {
-        setDetections(response.data.detections);
+      if (data.success) {
+        setIsCameraOn(!isCameraOn);
+        if (!isCameraOn) {
+          // Start fetching gestures when camera is turned on
+          startGestureFetching();
+        }
+      } else {
+        console.error('Failed to toggle camera');
       }
     } catch (error) {
-      console.error('Gesture detection error:', error);
+      console.error('Error toggling camera:', error);
     }
+    setIsLoading(false);
   };
 
-  const handleImageUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setMode('upload');
-      detectGesture(file);
-    }
+  const startGestureFetching = () => {
+    // Fetch current gesture periodically when camera is on
+    const fetchGesture = async () => {
+      if (!isCameraOn) return;
+      
+      try {
+        const response = await fetch('http://localhost:5000/current_gesture');
+        const data = await response.json();
+        setCurrentGesture(data);
+      } catch (error) {
+        console.error('Error fetching gesture:', error);
+      }
+    };
+
+    // Update gesture every 500ms
+    const intervalId = setInterval(fetchGesture, 500);
+    return () => clearInterval(intervalId);
   };
 
-  const startWebcam = () => {
-    setMode('webcam');
-  };
+  // Fetch supported gestures once on component mount
+  useEffect(() => {
+    const fetchSupportedGestures = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/supported_gestures');
+        const data = await response.json();
+        setSupportedGestures(data.gestures);
+      } catch (error) {
+        console.error('Error fetching supported gestures:', error);
+      }
+    };
+
+    fetchSupportedGestures();
+  }, []);
 
   return (
-    <div className={`app-container ${darkMode ? "dark-mode" : "light-mode"}`}>
-      <div className="box-container">
-        <h2>Sign Language Detection</h2>
-        <p>Upload an image or use webcam to detect sign language.</p>
-        
-        {/* Image Upload Button */}
-        <input 
-          type="file" 
-          ref={fileInputRef}
-          style={{ display: 'none' }}
-          accept="image/*"
-          onChange={handleImageUpload}
-        />
-        <button onClick={() => fileInputRef.current.click()}>
-          Upload Image
+    <div className="App">
+      <header className="App-header">
+        <h1>Real-time Sign Language Recognition</h1>
+        <button 
+          className={`camera-toggle ${isCameraOn ? 'on' : 'off'}`}
+          onClick={toggleCamera}
+          disabled={isLoading}
+        >
+          {isLoading ? 'Processing...' : (isCameraOn ? 'Turn Camera Off' : 'Turn Camera On')}
         </button>
-        
-        {/* Webcam Button */}
-        <button onClick={startWebcam}>
-          Start Webcam
-        </button>
+      </header>
 
-        {/* Webcam Component */}
-        {mode === 'webcam' && (
-          <div className="webcam-container">
-            <Webcam
-              ref={webcamRef}
-              screenshotFormat="image/jpeg"
-              videoConstraints={{
-                width: 640,
-                height: 480
-              }}
+      <main className="App-main">
+        <div className="video-container">
+          {isCameraOn ? (
+            <img 
+              src="http://localhost:5000/video_feed" 
+              alt="Video feed"
+              className="video-feed"
             />
-            <button onClick={() => detectGesture()}>
-              Detect Gesture
-            </button>
+          ) : (
+            <div className="video-placeholder">
+              <p>Camera is turned off</p>
+              <p>Click the button above to start</p>
+            </div>
+          )}
+          
+          <div className="current-gesture">
+            <h2>Current Gesture</h2>
+            <p className="gesture-name">{currentGesture.gesture}</p>
+            <p className="confidence">
+              Confidence: {(currentGesture.confidence * 100).toFixed(2)}%
+            </p>
           </div>
-        )}
+        </div>
 
-        {/* Detections Display */}
-        {detections.length > 0 && (
-          <div className="detections-container">
-            <h3>Detected Gestures:</h3>
-            {detections.map((detection, index) => (
-              <div key={index} className="detection">
-                <span>Gesture: {detection.class}</span>
-                <span>Confidence: {detection.confidence.toFixed(2)}</span>
+        <div className="gestures-list">
+          <h2>Supported Gestures</h2>
+          <div className="gestures-grid">
+            {supportedGestures.map((gesture, index) => (
+              <div key={index} className="gesture-card">
+                <h3>{gesture.name}</h3>
+                <p>{gesture.description}</p>
+                <p><strong>Meaning:</strong> {gesture.meaning}</p>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      </main>
     </div>
   );
-};
+}
 
-export default SignLanguagePage;
+export default App;
