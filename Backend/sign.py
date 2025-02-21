@@ -1,53 +1,202 @@
-# filepath: /workspaces/Ctrl-alt/sign.py
+import os
 import cv2
-import mediapipe as mp
-import tensorflow as tf
 import numpy as np
+import base64
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from inference_sdk import InferenceHTTPClient
+from PIL import Image
+import io
 
-# Initialize MediaPipe Hands
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
-mp_drawing = mp.solutions.drawing_utils
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
-# Load the pre-trained model
-model = tf.keras.models.load_model('path/to/your/pretrained/model.h5')
+# Roboflow Configuration
+ROBOFLOW_API_KEY = "VPR9lg8GcJdrBTP4yd0S"
+ROBOFLOW_MODEL_ID = "hand-gestures-8frsz/3"
 
-# Initialize the webcam
-cap = cv2.VideoCapture(0)
+class HandGestureDetector:
+    def __init__(self, api_key, model_id):
+        self.client = InferenceHTTPClient(
+            api_url="https://detect.roboflow.com",
+            api_key=api_key
+        )
+        self.model_id = model_id
 
-# Define a function to recognize gestures using the pre-trained model
-def recognize_gesture(landmarks):
-    # Extract the coordinates of the landmarks
-    coords = np.array([[landmark.x, landmark.y, landmark.z] for landmark in landmarks]).flatten()
-    # Predict the gesture using the pre-trained model
-    prediction = model.predict(np.expand_dims(coords, axis=0))
-    gesture = np.argmax(prediction)
-    return gesture
+    def detect_gesture(self, image_path):
+        try:
+            # Perform inference
+            result = self.client.infer(
+                image_path, 
+                model_id=self.model_id
+            )
+            
+            # Process and return detections
+            return self._parse_detections(result)
+        
+        except Exception as e:
+            print(f"Gesture detection error: {e}")
+            return []
+    
+    def _parse_detections(self, result):
+        detections = []
+        
+        if 'predictions' in result:
+            for pred in result['predictions']:
+                detection = {
+                    'class': pred.get('class', 'Unknown'),
+                    'confidence': pred.get('confidence', 0),
+                    'bbox': {
+                        'x': pred.get('x', 0),
+                        'y': pred.get('y', 0),
+                        'width': pred.get('width', 0),
+                        'height': pred.get('height', 0)
+                    }
+                }
+                detections.append(detection)
+        
+        return detections
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+    def visualize_detections(self, image_path, detections):
+        # Load image
+        image = cv2.imread(image_path)
+        
+        # Draw bounding boxes
+        for detection in detections:
+            x = int(detection['bbox']['x'] - detection['bbox']['width'] / 2)
+            y = int(detection['bbox']['y'] - detection['bbox']['height'] / 2)
+            w = int(detection['bbox']['width'])
+            h = int(detection['bbox']['height'])
+            
+            # Draw rectangle
+            cv2.rectangle(
+                image, 
+                (x, y), 
+                (x + w, y + h), 
+                (0, 255, 0), 
+                2
+            )
+            
+            # Add label
+            label = f"{detection['class']}: {detection['confidence']:.2f}"
+            cv2.putText(
+                image, 
+                label, 
+                (x, y - 10), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.9, 
+                (0, 255, 0), 
+                2
+            )
+        
+        # Save annotated image
+        output_path = 'detected_gestures.jpg'
+        cv2.imwrite(output_path, image)
+        return output_path
 
-    # Convert the frame to RGB
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+def base64_to_image(base64_string):
+    """
+    Convert base64 string to image file
+    """
+    try:
+        # Remove header if present
+        if ',' in base64_string:
+            base64_string = base64_string.split(',')[1]
+        
+        # Decode base64
+        image_bytes = base64.b64decode(base64_string)
+        
+        # Convert to numpy array
+        image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+        
+        # Decode image
+        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        
+        # Save temporary image
+        temp_image_path = 'temp_uploaded_image.jpg'
+        cv2.imwrite(temp_image_path, image)
+        
+        return temp_image_path
+    
+    except Exception as e:
+        print(f"Image conversion error: {e}")
+        return None
 
-    # Process the frame with MediaPipe Hands
-    result = hands.process(rgb_frame)
+# Initialize Gesture Detector
+gesture_detector = HandGestureDetector(
+    api_key=ROBOFLOW_API_KEY, 
+    model_id=ROBOFLOW_MODEL_ID
+)
 
-    if result.multi_hand_landmarks:
-        for hand_landmarks in result.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            gesture = recognize_gesture(hand_landmarks.landmark)
-            cv2.putText(frame, str(gesture), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+@app.route('/detect_gesture', methods=['POST'])
+def detect_gesture():
+    try:
+        # Get base64 image from request
+        data = request.get_json()
+        base64_image = data.get('image')
+        
+        # Validate input
+        if not base64_image:
+            return jsonify({
+                'success': False, 
+                'message': 'No image provided'
+            }), 400
+        
+        # Convert base64 to image file
+        image_path = base64_to_image(base64_image)
+        
+        # Validate image conversion
+        if not image_path:
+            return jsonify({
+                'success': False, 
+                'message': 'Invalid image format'
+            }), 400
+        
+        # Perform gesture detection
+        detections = gesture_detector.detect_gesture(image_path)
+        
+        # Optional: Visualize detections
+        if detections:
+            visualization_path = gesture_detector.visualize_detections(image_path, detections)
+        
+        # Prepare response
+        response = {
+            'success': True,
+            'detections': detections,
+            'visualization_path': visualization_path if detections else None
+        }
+        
+        return jsonify(response)
+    
+    except Exception as e:
+        print(f"Detection error: {e}")
+        return jsonify({
+            'success': False, 
+            'message': str(e)
+        }), 500
 
-    # Display the frame
-    cv2.imshow('Sign Language Recognition', frame)
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Sign Language Detection Backend is running'
+    })
 
-    # Break the loop if 'q' is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+def setup_environment():
+    """
+    Ensure necessary directories and configurations
+    """
+    # Create directories if they don't exist
+    os.makedirs('uploads', exist_ok=True)
+    os.makedirs('detections', exist_ok=True)
 
-# Release the webcam and close the window
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == '__main__':
+    # Setup environment
+    setup_environment()
+    
+    # Run Flask app
+    app.run(
+        host='0.0.0.0', 
+        port=5000, 
+        debug=True
+    )
