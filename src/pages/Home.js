@@ -5,7 +5,10 @@ import {
   FaHandshake, 
   FaMoon, 
   FaSun, 
-  FaArrowRight 
+  FaArrowRight,
+  FaVolumeUp,  // Icon for Text to Speech
+  FaSignLanguage,  // Icon for Text to Sign
+  FaHeartbeat  // Icon for Healthbot
 } from 'react-icons/fa';
 
 const Home = () => {
@@ -214,6 +217,72 @@ const Home = () => {
           </h2>
           <p style={styles.featureDescription}>
             Bridge communication gaps with real-time sign language translation.
+          </p>
+          <div style={styles.exploreLink}>
+            <span>Explore</span>
+            <FaArrowRight style={{ marginLeft: '0.5rem' }} />
+          </div>
+        </div>
+
+        {/* Text to Speech Feature Card */}
+        <div 
+          style={styles.featureCard}
+          onClick={() => navigate("/text-to-speech")}
+          onMouseOver={handleCardHoverIn}
+          onMouseOut={handleCardHoverOut}
+        >
+          <div style={{...styles.featureIcon, color: '#f6ad55'}}>
+            <FaVolumeUp />
+          </div>
+          <h2 style={styles.featureTitle}>
+            Text to Speech
+          </h2>
+          <p style={styles.featureDescription}>
+            Convert written text into clear and natural speech in real-time.
+          </p>
+          <div style={styles.exploreLink}>
+            <span>Explore</span>
+            <FaArrowRight style={{ marginLeft: '0.5rem' }} />
+          </div>
+        </div>
+
+        {/* Text to Sign Feature Card */}
+        <div 
+          style={styles.featureCard}
+          onClick={() => navigate("/text-to-sign")}
+          onMouseOver={handleCardHoverIn}
+          onMouseOut={handleCardHoverOut}
+        >
+          <div style={{...styles.featureIcon, color: '#9b2c2c'}}>
+            <FaSignLanguage />
+          </div>
+          <h2 style={styles.featureTitle}>
+            Text to Sign
+          </h2>
+          <p style={styles.featureDescription}>
+            Transform text into visual sign language representations.
+          </p>
+          <div style={styles.exploreLink}>
+            <span>Explore</span>
+            <FaArrowRight style={{ marginLeft: '0.5rem' }} />
+          </div>
+        </div>
+
+        {/* Healthbot Feature Card */}
+        <div 
+          style={styles.featureCard}
+          onClick={() => navigate("/healthbot")}
+          onMouseOver={handleCardHoverIn}
+          onMouseOut={handleCardHoverOut}
+        >
+          <div style={{...styles.featureIcon, color: '#e53e3e'}}>
+            <FaHeartbeat />
+          </div>
+          <h2 style={styles.featureTitle}>
+            Healthbot
+          </h2>
+          <p style={styles.featureDescription}>
+            A virtual assistant offering health advice and symptom checker.
           </p>
           <div style={styles.exploreLink}>
             <span>Explore</span>

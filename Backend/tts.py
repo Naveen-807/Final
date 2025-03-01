@@ -1,152 +1,113 @@
-import os
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import azure.cognitiveservices.speech as speechsdk
-import tempfile
+import os
+import uuid
 import pdfplumber
 from werkzeug.utils import secure_filename
-from dotenv import load_dotenv
-import uuid
-
-# Load environment variables
-load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# Get Azure credentials from environment variables
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
+# Create directories for files
+AUDIO_OUTPUT_DIR = "audio_output"
+UPLOAD_FOLDER = "uploads"
+os.makedirs(AUDIO_OUTPUT_DIR, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Configure upload folder
-UPLOAD_FOLDER = 'temp_uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# Configuration
+ALLOWED_EXTENSIONS = {'pdf'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Available voices
+# Azure Configuration
+speech_key = os.getenv("AZURE_SPEECH_KEY")
+service_region = os.getenv("AZURE_SPEECH_REGION", "eastus")
+if not speech_key:
+    raise ValueError("Missing Azure Speech API key. Set AZURE_SPEECH_KEY in environment variables.")
+
+speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
+
 AVAILABLE_VOICES = {
-    "en-US-Male": "en-US-GuyNeural",
-    "en-US-Female": "en-US-JennyNeural",
-    "en-IN-Male": "en-IN-AaravNeural",
-    "en-IN-Female": "en-IN-NeerjaNeural",
-    "en-GB-Male": "en-GB-RyanNeural",
-    "en-GB-Female": "en-GB-SoniaNeural"
+    "tamil_female": "ta-IN-PallaviNeural",
+    "tamil_male": "ta-IN-ValluvarNeural",
+    "english_female": "en-US-JennyNeural",
+    "english_male": "en-US-GuyNeural"
 }
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_text_from_pdf(file_path):
+    text = ""
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    return text.strip()
+
+@app.route('/api/tts', methods=['POST'])
+def text_to_speech():
+    try:
+        voice_key = request.form.get('voice', 'tamil_female')
+        if voice_key not in AVAILABLE_VOICES:
+            return jsonify({"error": "Invalid voice selection"}), 400
+
+        text = ""
+        file_path = None
+        
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                text = extract_text_from_pdf(file_path)
+                os.remove(file_path)
+            else:
+                return jsonify({"error": "Invalid file format. Only PDF files are allowed"}), 400
+        else:
+            data = request.get_json()
+            if not data or 'text' not in data:
+                return jsonify({"error": "No text or file provided"}), 400
+            text = data['text'].strip()
+
+        if not text:
+            return jsonify({"error": "No text content found"}), 400
+
+        # Generate unique filename for audio output
+        audio_filename = os.path.join(AUDIO_OUTPUT_DIR, f"{uuid.uuid4()}.wav")
+
+        # Configure speech synthesis
+        speech_config.speech_synthesis_voice_name = AVAILABLE_VOICES[voice_key]
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=audio_filename)
+        
+        speech_synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=speech_config, 
+            audio_config=audio_config
+        )
+
+        print(f"Synthesizing text: {text}")
+        result = speech_synthesizer.speak_text_async(text).get()
+
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            response = send_file(
+                audio_filename,
+                mimetype="audio/wav",
+                as_attachment=True,
+                download_name="speech.wav"
+            )
+            os.remove(audio_filename)  # Clean up after sending response
+            return response
+        else:
+            return jsonify({"error": f"Speech synthesis failed: {result.reason}"}), 500
+
+    except Exception as e:
+        print(f"Exception occurred: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/voices', methods=['GET'])
 def get_voices():
-    return jsonify(list(AVAILABLE_VOICES.keys()))
-
-@app.route('/api/synthesize-text', methods=['POST'])
-def synthesize_text():
-    data = request.json
-    if not data or 'text' not in data:
-        return jsonify({"error": "No text provided"}), 400
-    
-    text = data['text']
-    voice_name = AVAILABLE_VOICES.get(data.get('voice', 'en-US-Male'))
-    
-    # Configure speech service
-    speech_config = speechsdk.SpeechConfig(subscription=AZURE_SPEECH_KEY, region=AZURE_SPEECH_REGION)
-    speech_config.speech_synthesis_voice_name = voice_name
-    
-    # Generate unique file name
-    file_id = str(uuid.uuid4())
-    temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.wav")
-    
-    # Configure audio output
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=temp_file_path)
-    
-    # Create synthesizer and generate speech
-    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    result = synthesizer.speak_text_async(text).get()
-    
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        return jsonify({
-            "status": "success",
-            "message": "Speech synthesis completed",
-            "audioUrl": f"/api/audio/{file_id}"
-        })
-    else:
-        error_details = result.cancellation_details.error_details if result.cancellation_details else "Unknown error"
-        return jsonify({"error": f"Speech synthesis failed: {error_details}"}), 500
-
-@app.route('/api/process-pdf', methods=['POST'])
-def process_pdf():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file provided"}), 400
-    
-    pdf_file = request.files['file']
-    voice = request.form.get('voice', 'en-US-Male')
-    
-    if pdf_file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
-    
-    if not pdf_file.filename.lower().endswith('.pdf'):
-        return jsonify({"error": "File must be a PDF"}), 400
-    
-    try:
-        # Save uploaded file
-        filename = secure_filename(pdf_file.filename)
-        pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        pdf_file.save(pdf_path)
-        
-        # Extract text from PDF
-        with pdfplumber.open(pdf_path) as pdf:
-            pdf_text = ""
-            for page in pdf.pages:
-                extracted_text = page.extract_text()
-                if extracted_text:
-                    pdf_text += extracted_text + " "
-        
-        if not pdf_text.strip():
-            return jsonify({"error": "Could not extract text from PDF"}), 400
-        
-        # Convert text to speech
-        speech_config = speechsdk.SpeechConfig(subscription=AZURE_SPEECH_KEY, region=AZURE_SPEECH_REGION)
-        speech_config.speech_synthesis_voice_name = AVAILABLE_VOICES.get(voice)
-        
-        # Generate unique file name
-        file_id = str(uuid.uuid4())
-        temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.wav")
-        
-        # Configure audio output
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=temp_file_path)
-        
-        # Create synthesizer and generate speech
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-        result = synthesizer.speak_text_async(pdf_text).get()
-        
-        # Clean up PDF file
-        os.remove(pdf_path)
-        
-        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            return jsonify({
-                "status": "success",
-                "message": "PDF processed successfully",
-                "text": pdf_text[:1000] + ("..." if len(pdf_text) > 1000 else ""),
-                "fullTextLength": len(pdf_text),
-                "audioUrl": f"/api/audio/{file_id}"
-            })
-        else:
-            error_details = result.cancellation_details.error_details if result.cancellation_details else "Unknown error"
-            return jsonify({"error": f"Speech synthesis failed: {error_details}"}), 500
-    
-    except Exception as e:
-        return jsonify({"error": f"Error processing PDF: {str(e)}"}), 500
-
-@app.route('/api/audio/<file_id>', methods=['GET'])
-def get_audio(file_id):
-    # Sanitize the file_id to prevent directory traversal
-    file_id = secure_filename(file_id)
-    audio_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.wav")
-    
-    if os.path.exists(audio_path):
-        return send_file(audio_path, mimetype='audio/wav', as_attachment=False)
-    else:
-        return jsonify({"error": "Audio file not found"}), 404
+    return jsonify({"voices": AVAILABLE_VOICES})
 
 if __name__ == '__main__':
-    # For development only - use proper WSGI server in production
-    app.run(debug=True, port=5000)
+    app.run(debug=True)

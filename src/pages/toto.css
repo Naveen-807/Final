@@ -1,0 +1,146 @@
+/* toto.css */
+:root {
+  --bg-dark: #121212;
+  --bg-darker: #0a0a0a;
+  --primary-color: #6b4eff;
+  --secondary-color: #00e5ff;
+  --text-color: #e0e0e0;
+  --border-color: #333;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-color);
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
+}
+
+.text-to-speech-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(
+    135deg, 
+    var(--bg-dark) 0%, 
+    var(--bg-darker) 100%
+  );
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  background: linear-gradient(
+    90deg, 
+    var(--primary-color), 
+    var(--secondary-color)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 2rem;
+  text-align: center;
+  text-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+.input-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+}
+
+.input-field {
+  width: 100%;
+  padding: 1rem 1.5rem;
+  border: 2px solid var(--border-color);
+  background-color: rgba(30,30,30,0.8);
+  color: var(--text-color);
+  font-size: 1.2rem;
+  border-radius: 12px;
+  outline: none;
+  transition: all 0.3s ease;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+}
+
+.input-field:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 4px rgba(107, 74, 255, 0.2);
+}
+
+.gif-container {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.gif-image {
+  max-width: 300px;
+  border-radius: 16px;
+  box-shadow: 0 15px 30px rgba(0,0,0,0.4);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.gif-image:hover {
+  transform: scale(1.05);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+}
+
+.error-message {
+  color: #ff4d4d;
+  font-weight: 600;
+  margin-top: 1rem;
+  text-align: center;
+  animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  .title {
+    font-size: 2rem;
+  }
+
+  .input-field {
+    font-size: 1rem;
+    padding: 0.8rem 1.2rem;
+  }
+
+  .gif-image {
+    max-width: 250px;
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-darker);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary-color);
+}
